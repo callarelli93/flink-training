@@ -19,6 +19,8 @@
 package org.apache.flink.training.exercises.ridesandfares;
 
 import org.apache.flink.api.common.JobExecutionResult;
+import org.apache.flink.api.common.state.MapState;
+import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -33,6 +35,8 @@ import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
 import org.apache.flink.training.exercises.common.sources.TaxiRideGenerator;
 import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
 import org.apache.flink.util.Collector;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 
 /**
  * The Stateful Enrichment exercise from the Flink training.
@@ -98,20 +102,49 @@ public class RidesAndFaresExercise {
 
     public static class EnrichmentFunction
             extends RichCoFlatMapFunction<TaxiRide, TaxiFare, RideAndFare> {
+        private MapState<Long, TaxiRide> ridesState;
+        private MapState<Long, TaxiFare> faresState;
 
         @Override
         public void open(Configuration config) throws Exception {
-            throw new MissingSolutionException();
+            ridesState = getRuntimeContext()
+                    .getMapState(new MapStateDescriptor<>("ridesState", Long.class, TaxiRide.class));
+            faresState = getRuntimeContext()
+                    .getMapState(new MapStateDescriptor<>("faresState", Long.class, TaxiFare.class));
         }
 
         @Override
-        public void flatMap1(TaxiRide ride, Collector<RideAndFare> out) throws Exception {
-            throw new MissingSolutionException();
+        public void flatMap1(TaxiRide ride, Collector<RideAndFare> out) throws Exception{
+            // First handle rides state
+            if (!ridesState.contains(ride.rideId)) {
+                ridesState.put(ride.rideId, ride);
+            }
+
+            //  Emit a value if the matching taxiFare is found
+            if (faresState.contains(ride.rideId)) {
+                TaxiFare fare = faresState.get(ride.rideId);
+                out.collect(new RideAndFare(ride, fare));
+                // Clear state
+                ridesState.remove(ride.rideId);
+                faresState.remove(ride.rideId);
+            }
         }
 
         @Override
         public void flatMap2(TaxiFare fare, Collector<RideAndFare> out) throws Exception {
-            throw new MissingSolutionException();
+            // First handle fares state
+            if (!faresState.contains(fare.rideId)) {
+                faresState.put(fare.rideId, fare);
+            }
+
+            //  Emit a value if the matching taxiRide is found
+            if (ridesState.contains(fare.rideId)) {
+                TaxiRide ride = ridesState.get(fare.rideId);
+                out.collect(new RideAndFare(ride, fare));
+                // Clear state
+                ridesState.remove(fare.rideId);
+                faresState.remove(fare.rideId);
+            }
         }
     }
 }
